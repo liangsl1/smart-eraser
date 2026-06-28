@@ -1,0 +1,261 @@
+<!DOCTYPE html>
+<html lang="zh-Hant">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Smart Eraser AI - 智能照片橡皮擦</title>
+    <!-- Google Fonts: Inter & Noto Sans TC -->
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=Noto+Sans+TC:wght@300;400;500;700&display=swap" rel="stylesheet">
+    <!-- Main Style Sheet -->
+    <link rel="stylesheet" href="style.css">
+</head>
+<body>
+    <!-- OpenCV.js Loading Backdrop -->
+    <div id="loading-backdrop" class="modal-backdrop">
+        <div class="modal-content glass-card">
+            <div class="spinner-container">
+                <div class="glow-spinner"></div>
+            </div>
+            <h2>載入 AI 影像引擎中...</h2>
+            <p>這需要下載約 8MB 的 WebAssembly 模組，請稍候</p>
+            <div class="progress-bar-container">
+                <div id="loading-progress" class="progress-bar"></div>
+            </div>
+            <span id="loading-status">正在初始化 OpenCV 核心...</span>
+        </div>
+    </div>
+
+    <!-- Main Container -->
+    <div class="app-container">
+        <!-- Header -->
+        <header class="app-header">
+            <div class="logo-area">
+                <div class="logo-icon">✨</div>
+                <h1>Smart Eraser <span class="badge">AI</span></h1>
+            </div>
+            <p class="subtitle">純本地運行的智慧照片橡皮擦，無縫抹除畫面中多餘的人物或雜物</p>
+        </header>
+
+        <!-- Main Workspace -->
+        <div class="workspace">
+            <!-- Sidebar Controls -->
+            <aside class="sidebar glass-card">
+                <!-- Image Import Section -->
+                <div class="control-group">
+                    <label class="group-title">1. 載入照片</label>
+                    <div class="upload-btn-wrapper">
+                        <button class="btn btn-primary btn-block" id="upload-trigger">
+                            <svg class="icon" viewBox="0 0 24 24"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4M17 8l-5-5-5 5M12 3v12"/></svg>
+                            上傳您的照片
+                        </button>
+                        <input type="file" id="image-loader" accept="image/*" style="display: none;">
+                    </div>
+                    <button class="btn btn-secondary btn-block mt-2" id="demo-btn">
+                        <svg class="icon" viewBox="0 0 24 24"><path d="M12 2v20M17 5H9.5a3.5 3.5 0 0 0 0 7h5a3.5 3.5 0 0 1 0 7H6"/></svg>
+                        試用範例圖片
+                    </button>
+                </div>
+
+                <!-- Eraser Settings -->
+                <div class="control-group disabled-when-no-img" id="eraser-controls">
+                    <label class="group-title">2. 塗抹設定</label>
+                    
+                    <!-- Brush Size -->
+                    <div class="setting-item">
+                        <div class="slider-header">
+                            <span>畫筆大小 (Brush Size)</span>
+                            <span id="brush-size-val">30px</span>
+                        </div>
+                        <input type="range" id="brush-size" min="5" max="100" value="30" class="custom-slider">
+                        <div class="brush-preview-container">
+                            <div id="brush-preview"></div>
+                        </div>
+                    </div>
+
+                    <!-- History / Edit Actions -->
+                    <div class="btn-row">
+                        <button class="btn btn-icon" id="undo-btn" title="復原上一筆 (Undo)">
+                            <svg class="icon" viewBox="0 0 24 24"><path d="M3 7v6h6M21 17a9 9 0 0 0-9-9 9 9 0 0 0-6 2.3L3 13"/></svg>
+                            復原
+                        </button>
+                        <button class="btn btn-icon" id="redo-btn" title="重做下一筆 (Redo)">
+                            <svg class="icon" viewBox="0 0 24 24"><path d="M21 7v6h-6M3 17a9 9 0 0 1 9-9 9 9 0 0 1 6 2.3l3 2.7"/></svg>
+                            重做
+                        </button>
+                    </div>
+                    
+                    <button class="btn btn-secondary btn-block mt-2" id="clear-mask-btn">
+                        <svg class="icon" viewBox="0 0 24 24"><path d="M3 6h18M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/></svg>
+                        清除塗抹遮罩
+                    </button>
+                </div>
+
+                <!-- Inpaint Engine Options -->
+                <div class="control-group disabled-when-no-img">
+                    <label class="group-title">3. 擦除演算法</label>
+                    <div class="algo-tabs">
+                        <label class="algo-tab">
+                            <input type="radio" name="algorithm" value="telea" checked>
+                            <span class="tab-label">Telea (快速路徑)</span>
+                        </label>
+                        <label class="algo-tab">
+                            <input type="radio" name="algorithm" value="ns">
+                            <span class="tab-label">Navier-Stokes (平滑流體)</span>
+                        </label>
+                    </div>
+                    <p class="algo-desc" id="algo-desc-text">
+                        Telea 演算法：基於快速行進法 (FMM)，從邊緣逐步向內插值，最適合去除線狀、細長人物或中小型污點。
+                    </p>
+                </div>
+
+                <!-- Execution Actions -->
+                <div class="control-group disabled-when-no-img">
+                    <button class="btn btn-accent btn-block btn-lg pulse-glow" id="erase-btn">
+                        <svg class="icon" viewBox="0 0 24 24"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/></svg>
+                        執行 AI 抹除
+                    </button>
+                    <div class="btn-row mt-2">
+                        <button class="btn btn-success" id="download-btn">
+                            <svg class="icon" viewBox="0 0 24 24"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4M7 10l5 5 5-5M12 15V3"/></svg>
+                            下載結果
+                        </button>
+                        <button class="btn btn-secondary" id="reset-btn">
+                            <svg class="icon" viewBox="0 0 24 24"><path d="M21.5 2v6h-6M21.34 15.57a10 10 0 1 1-.57-8.38l5.67-5.67"/></svg>
+                            還原原圖
+                        </button>
+                    </div>
+                </div>
+            </aside>
+
+            <!-- Canvas Viewport -->
+            <main class="viewport-area">
+                <!-- Dropzone / Empty State -->
+                <div class="drop-zone" id="drop-zone">
+                    <div class="drop-zone-content">
+                        <div class="upload-illustration">✨</div>
+                        <h3>拖放照片至此處，或點擊左側按鈕上傳</h3>
+                        <p>支援 JPG、PNG 格式照片。所有修圖計算皆在您的瀏覽器本地完成，無隱私外洩風險。</p>
+                        <button class="btn btn-primary mt-3" id="drop-zone-btn">選擇檔案</button>
+                    </div>
+                </div>
+
+                <!-- Canvas Editor Container -->
+                <div class="editor-container glass-card" id="editor-container" style="display: none;">
+                    <div class="editor-header">
+                        <div class="status-indicator">
+                            <span class="pulse-dot"></span>
+                            <span id="editor-status">準備就緒：請在要刪除的人物上進行塗抹</span>
+                        </div>
+                        <div class="compare-toggle-container" id="compare-toggle-container" style="display: none;">
+                            <button class="btn btn-secondary btn-sm" id="btn-toggle-compare">
+                                按住以對比原圖
+                            </button>
+                        </div>
+                    </div>
+
+                    <!-- The Canvas Stack -->
+                    <div class="canvas-wrapper" id="canvas-wrapper">
+                        <!-- Canvas for drawing and interacting -->
+                        <canvas id="view-canvas"></canvas>
+                        
+                        <!-- Comparison Slider Layer -->
+                        <div class="comparison-slider-container" id="slider-container" style="display: none;">
+                            <div class="slider-image-wrapper" id="slider-original-wrapper">
+                                <canvas id="slider-original-canvas"></canvas>
+                            </div>
+                            <div class="slider-image-wrapper" id="slider-result-wrapper">
+                                <canvas id="slider-result-canvas"></canvas>
+                            </div>
+                            <!-- Drag Handle -->
+                            <div class="slider-handle" id="slider-handle">
+                                <div class="handle-line"></div>
+                                <div class="handle-button">
+                                    <svg viewBox="0 0 24 24" class="handle-arrows"><path d="M8 7l-5 5 5 5M16 7l5 5-5 5"/></svg>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </main>
+        </div>
+    </div>
+
+    <!-- Hidden Utility Canvases for Image Processing -->
+    <canvas id="source-canvas" style="display: none;"></canvas>
+    <canvas id="mask-canvas" style="display: none;"></canvas>
+    <canvas id="temp-canvas" style="display: none;"></canvas>
+
+    <!-- OpenCV.js Library Auto-Failover Loader -->
+    <script>
+      (function() {
+        const cdns = [
+          "opencv.js", // First, try loading locally
+          "https://cdn.jsdelivr.net/npm/@techstark/opencv-js/dist/opencv.js", // Resolves to latest stable on npm
+          "https://docs.opencv.org/4.5.5/opencv.js", // Stable official build
+          "https://cdnjs.cloudflare.com/ajax/libs/open-cv/4.5.5/opencv.js"
+        ];
+        let currentIndex = 0;
+        let timeoutId = null;
+
+        window.loadOpenCV = function() {
+          if (currentIndex >= cdns.length) {
+            document.getElementById('loading-status').textContent = '所有載入伺服器及本地檔案均失效，請下載本地版或檢查網路！';
+            return;
+          }
+
+          const url = cdns[currentIndex];
+          const isLocal = url === 'opencv.js';
+          
+          if (isLocal) {
+            document.getElementById('loading-status').textContent = '正在檢查本地影像引擎 (opencv.js)...';
+          } else {
+            document.getElementById('loading-status').textContent = `正在嘗試從網路載入影像引擎 (連結 ${currentIndex}/${cdns.length - 1})...`;
+          }
+          
+          const script = document.createElement('script');
+          script.async = true;
+          script.src = url;
+          script.id = 'opencv-script';
+
+          // Set 3 seconds timeout for local file, 12 seconds for remote CDNs
+          const timeoutDuration = isLocal ? 3000 : 12000;
+          timeoutId = setTimeout(() => {
+            console.warn(`OpenCV load timed out from: ${url}. Trying next source.`);
+            cleanupAndLoadNext(script);
+          }, timeoutDuration);
+
+          script.onload = function() {
+            clearTimeout(timeoutId);
+            console.log(`OpenCV.js successfully loaded from: ${url}`);
+            document.getElementById('loading-status').textContent = '影像引擎載入完成，正在初始化...';
+          };
+
+          script.onerror = function() {
+            clearTimeout(timeoutId);
+            console.warn(`OpenCV load error from: ${url}. Trying next source.`);
+            cleanupAndLoadNext(script);
+          };
+
+          document.body.appendChild(script);
+        };
+
+        function cleanupAndLoadNext(scriptNode) {
+          if (scriptNode && scriptNode.parentNode) {
+            scriptNode.parentNode.removeChild(scriptNode);
+          }
+          currentIndex++;
+          window.loadOpenCV();
+        }
+
+        // Start loading when window elements are parsed
+        window.addEventListener('DOMContentLoaded', () => {
+          setTimeout(window.loadOpenCV, 100);
+        });
+      })();
+    </script>
+    <!-- App Script -->
+    <script src="app.js"></script>
+</body>
+</html>
